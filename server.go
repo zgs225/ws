@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 )
 
 const (
@@ -24,6 +25,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		conn.Close()
 		log.Println(err)
 	}
+
+	go func() {
+		t := time.Tick(time.Second)
+		for range t {
+			df := DataFrame{}
+			df.Write([]byte("ni hao"))
+			bufrw.Write(df.Bytes())
+			bufrw.Flush()
+		}
+	}()
 
 	for {
 		frame := new(DataFrame)

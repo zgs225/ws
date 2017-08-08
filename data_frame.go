@@ -62,6 +62,41 @@ func parseDataFrameHeader(r io.ByteReader) (DataFrameHeader, error) {
 	return DataFrameHeader(h), nil
 }
 
+func NewDataFrameHeader() DataFrameHeader {
+	return DataFrameHeader{OpCodes_TEXT | DataFrame_BIT1, 0}
+}
+
+func (h DataFrameHeader) AddLen(l uint64) DataFrameHeader {
+	if l == 0 {
+		return h
+	}
+	b1 := h[0]
+	rv := DataFrameHeader{b1}
+	ms := h[1] & DataFrame_BIT1
+	mk := MaskKey{}
+	if ms != 0 {
+		mk = h.MaskKey()
+	}
+	ll := l + h.Length()
+	if ll <= 125 {
+		rv = append(rv, byte(ll)|ms)
+	} else if ll <= 65535 {
+		rv = append(rv, 126|ms)
+		lb := make([]byte, 2)
+		binary.BigEndian.PutUint16(lb, uint16(ll))
+		rv = append(rv, lb...)
+	} else {
+		rv = append(rv, 127|ms)
+		lb := make([]byte, 8)
+		binary.BigEndian.PutUint64(lb, ll)
+		rv = append(rv, lb...)
+	}
+	if ms != 0 {
+		rv = append(rv, mk[:]...)
+	}
+	return rv
+}
+
 func (h DataFrameHeader) Length() uint64 {
 	l := h[1] & DataFrame_BIT7
 	if l <= 125 {
@@ -99,4 +134,22 @@ func (df *DataFrame) GetPayload() []byte {
 		copy(b, df.Payload)
 	}
 	return b
+}
+
+func (df *DataFrame) Write(p []byte) (int, error) {
+	if df.Header == nil {
+		df.Header = NewDataFrameHeader()
+	}
+	l := len(p)
+	df.Payload = append(df.Payload, p...)
+	df.Header = df.Header.AddLen(uint64(l))
+	return l, nil
+}
+
+func (df *DataFrame) Bytes() []byte {
+	l := len(df.Header) + len(df.Payload)
+	v := make([]byte, l)
+	v = append(v, df.Header...)
+	v = append(v, df.Payload...)
+	return v
 }
