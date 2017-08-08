@@ -153,7 +153,7 @@ func (df *DataFrame) Write(p []byte) (int, error) {
 
 func (df *DataFrame) Bytes() []byte {
 	l := len(df.Header) + len(df.Payload)
-	v := make([]byte, l)
+	v := make([]byte, 0, l)
 	v = append(v, df.Header...)
 	v = append(v, df.Payload...)
 	return v
