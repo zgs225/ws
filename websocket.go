@@ -26,6 +26,7 @@ type WebSocket struct {
 	W       http.ResponseWriter
 	Request *http.Request
 
+	ID      uint
 	OutCH   chan []byte
 	InCH    chan *DataFrame
 	Closed  bool
@@ -36,6 +37,7 @@ func NewWebSocket(w http.ResponseWriter, request *http.Request, before func(*Web
 	ws = &WebSocket{
 		W:       w,
 		Request: request,
+		ID:      NextGlobalID(),
 		OutCH:   make(chan []byte),
 		InCH:    make(chan *DataFrame),
 		CloseCH: make(chan struct{}),

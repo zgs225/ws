@@ -3,13 +3,16 @@ package main
 import (
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/zgs225/ws"
 )
 
 func main() {
 	server := &ws.Server{
+		OnOpen: func(socket *ws.WebSocket) error {
+			log.Printf("ws[%d] connected from %s.", socket.ID, socket.Request.RemoteAddr)
+			return nil
+		},
 		OnMessage: func(df *ws.DataFrame, socket *ws.WebSocket) error {
 			log.Println("Dataframe received.")
 			log.Println("Payload: ", string(df.GetPayload()))
