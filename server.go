@@ -1,6 +1,9 @@
 package ws
 
-import "net/http"
+import (
+	"net/http"
+	"time"
+)
 
 type Server struct {
 	BeforeHandshake func(*WebSocket) (error, int)
@@ -26,11 +29,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 
 	go func() {
 		for {
+			if socket.Closed {
+				return
+			}
 			socket.Recv()
 		}
 	}()
 
+	go func() {
+		ticker := time.Tick(time.Second)
+		for range ticker {
+			if socket.Closed {
+				return
+			}
+			if err := socket.Handler.Ping(); err != nil {
+				socket.Close()
+				return
+			}
+		}
+	}()
+
 	for {
+		if socket.Closed {
+			return
+		}
 		select {
 		case p := <-socket.OutCH:
 			if err := socket.Handler.Send(p); err != nil {
@@ -53,11 +75,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 			case OpCodes_CLOSE:
 				socket.Close()
 			}
-		case <-socket.Closed:
+		case <-socket.CloseCH:
 			if s.OnClose != nil {
 				s.OnClose(socket)
 			}
 			socket.Handler.Close()
+			socket.Closed = true
 			return
 		}
 	}

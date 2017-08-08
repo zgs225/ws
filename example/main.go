@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/zgs225/ws"
 )
@@ -16,6 +17,18 @@ func main() {
 		},
 		OnError: func(socket *ws.WebSocket, err error) {
 			log.Println(err)
+		},
+		OnOpen: func(socket *ws.WebSocket) error {
+			go func() {
+				t := time.After(5 * time.Second)
+				<-t
+				socket.Close()
+			}()
+			return nil
+		},
+		OnClose: func(socket *ws.WebSocket) error {
+			log.Println("socket closed")
+			return nil
 		},
 	}
 

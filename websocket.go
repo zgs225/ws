@@ -26,9 +26,10 @@ type WebSocket struct {
 	W       http.ResponseWriter
 	Request *http.Request
 
-	OutCH  chan []byte
-	InCH   chan *DataFrame
-	Closed chan struct{}
+	OutCH   chan []byte
+	InCH    chan *DataFrame
+	Closed  bool
+	CloseCH chan struct{}
 }
 
 func NewWebSocket(w http.ResponseWriter, request *http.Request, before func(*WebSocket) (error, int)) (ws *WebSocket, err error) {
@@ -37,7 +38,7 @@ func NewWebSocket(w http.ResponseWriter, request *http.Request, before func(*Web
 		Request: request,
 		OutCH:   make(chan []byte),
 		InCH:    make(chan *DataFrame),
-		Closed:  make(chan struct{}),
+		CloseCH: make(chan struct{}),
 	}
 
 	if before != nil {
@@ -74,7 +75,7 @@ func (ws *WebSocket) Recv() {
 }
 
 func (ws *WebSocket) Close() {
-	ws.Closed <- struct{}{}
+	ws.CloseCH <- struct{}{}
 }
 
 func (ws *WebSocket) Handshake() error {
