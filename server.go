@@ -1,55 +1,42 @@
 package ws
 
-import (
-	"net/http"
-	"time"
-)
+import "net/http"
 
 type Server struct {
 	BeforeHandshake func(*WebSocket) (error, int)
 	OnOpen          func(*WebSocket) error
 	OnClose         func(*WebSocket) error
 	OnMessage       func(*DataFrame, *WebSocket) error
+	OnError         func(*WebSocket, error)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	ws, err := NewWebSocket(w, request)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	socket, err := NewWebSocket(w, request, s.BeforeHandshake)
 
-	if s.BeforeHandshake != nil {
-		if err, code := s.BeforeHandshake(ws); err != nil {
-			http.Error(w, err.Error(), code)
-			return
-		}
-	}
-
-	if err := ws.Handshake(); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err != nil && s.OnError != nil {
+		s.OnError(socket, err)
 		return
 	}
 
 	if s.OnOpen != nil {
-		if err := s.OnOpen(ws); err != nil {
-			ws.Close()
+		if err := s.OnOpen(socket); err != nil {
+			socket.Close()
 		}
 	}
 
 	go func() {
 		for {
-			ws.Recv()
+			socket.Recv()
 		}
 	}()
 
 	for {
 		select {
-		case df := <-ws.OutCH:
-			if err := ws.Handler.Send(df); err != nil {
-				ws.Close()
+		case p := <-socket.OutCH:
+			if err := socket.Handler.Send(p); err != nil {
+				socket.Close()
 			}
-		case df := <-ws.InCH:
+		case df := <-socket.InCH:
 			switch df.Header.GetOpCode() {
 			case OpCodes_CONTINUATION:
 				// TODO
@@ -57,20 +44,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 				// TODO
 			case OpCodes_TEXT:
 				if s.OnMessage != nil {
-					if err := s.OnMessage(df, ws); err != nil {
-						ws.Close()
+					if err := s.OnMessage(df, socket); err != nil {
+						socket.Close()
 					}
 				}
 			case OpCodes_PING:
-				ws.Handler.Pong()
+				socket.Handler.Pong()
 			case OpCodes_CLOSE:
-				ws.Close()
+				socket.Close()
 			}
-		case <-ws.Closed:
+		case <-socket.Closed:
 			if s.OnClose != nil {
-				s.OnClose(ws)
+				s.OnClose(socket)
 			}
-			ws.Handler.Close()
+			socket.Handler.Close()
+			return
 		}
 	}
 }

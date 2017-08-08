@@ -48,7 +48,7 @@ func (h *handler) Recv() (*DataFrame, error) {
 	}
 	frame.Header = header
 	frame.Payload = make([]byte, frame.Header.Length())
-	_, err := h.Bufrw.Read(frame.Payload)
+	_, err = h.Bufrw.Read(frame.Payload)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (h *handler) Recv() (*DataFrame, error) {
 }
 
 func (h *handler) Send(p []byte) error {
-	df := DataFrame{}
+	df := new(DataFrame)
 	if _, err := df.Write(p); err != nil {
 		return err
 	}

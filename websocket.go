@@ -26,29 +26,43 @@ type WebSocket struct {
 	W       http.ResponseWriter
 	Request *http.Request
 
-	OutCH  chan *DataFrame
+	OutCH  chan []byte
 	InCH   chan *DataFrame
 	Closed chan struct{}
 }
 
-func NewWebSocket(w http.ResponseWriter, request *http.Request) (ws *WebSocket, err error) {
+func NewWebSocket(w http.ResponseWriter, request *http.Request, before func(*WebSocket) (error, int)) (ws *WebSocket, err error) {
+	ws = &WebSocket{
+		W:       w,
+		Request: request,
+		OutCH:   make(chan []byte),
+		InCH:    make(chan *DataFrame),
+		Closed:  make(chan struct{}),
+	}
+
+	if before != nil {
+		var code int
+		if err, code = before(ws); err != nil {
+			http.Error(w, err.Error(), code)
+			return
+		}
+	}
+
+	if err = ws.Handshake(); err != nil {
+		return
+	}
+
 	var hdr Handler
 	if hdr, err = newHandler(w); err != nil {
 		return
 	}
-	ws = &WebSocket{
-		Handler: hdr,
-		W:       w,
-		Request: request,
-		OutCH:   make(chan *DataFrame),
-		InCH:    make(chan *DataFrame),
-		Closed:  make(chan struct{}),
-	}
+	ws.Handler = hdr
+
 	return
 }
 
-func (ws *WebSocket) Send(df *DataFrame) {
-	ws.OutCH <- df
+func (ws *WebSocket) Send(p []byte) {
+	ws.OutCH <- p
 }
 
 func (ws *WebSocket) Recv() {
@@ -75,10 +89,10 @@ func (ws *WebSocket) Handshake() error {
 	h.Write([]byte(WS_GUID))
 	sec := base64.StdEncoding.EncodeToString(h.Sum(nil)[:])
 
-	w.Header().Set("Sec-WebSocket-Accept", sec)
-	w.Header().Set("Upgrade", "websocket")
-	w.Header().Set("Connection", "Upgrade")
-	w.WriteHeader(http.StatusSwitchingProtocols)
+	ws.W.Header().Set("Sec-WebSocket-Accept", sec)
+	ws.W.Header().Set("Upgrade", "websocket")
+	ws.W.Header().Set("Connection", "Upgrade")
+	ws.W.WriteHeader(http.StatusSwitchingProtocols)
 
 	return nil
 }
@@ -87,12 +101,6 @@ func (ws *WebSocket) handshakeCheck() error {
 	// Check HTTP version
 	if ws.Request.ProtoMajor < 1 || (ws.Request.ProtoMajor == 1 && ws.Request.ProtoMinor < 1) {
 		return ErrHTTPVersion
-	}
-
-	// Check Host header
-	host := ws.Request.Header.Get("Host")
-	if len(host) == 0 || host != ws.Request.URL.Host {
-		return ErrHostHeader
 	}
 
 	// Check Upgrade header
