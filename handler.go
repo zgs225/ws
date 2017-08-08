@@ -16,6 +16,10 @@ type Handler interface {
 
 	Send(p []byte) error
 
+	Ping() error
+
+	Pong() error
+
 	Close() error
 }
 
@@ -77,6 +81,12 @@ func (h *handler) Close() error {
 
 func (h *handler) Ping() error {
 	hdr := DataFrameHeader{OpCodes_PING | DataFrame_BIT1, 0}
+	frm := &DataFrame{Header: hdr}
+	return h.send(frm)
+}
+
+func (h *handler) Pong() error {
+	hdr := DataFrameHeader{OpCodes_PONG | DataFrame_BIT1, 0}
 	frm := &DataFrame{Header: hdr}
 	return h.send(frm)
 }

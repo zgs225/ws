@@ -1,68 +1,76 @@
 package ws
 
 import (
-	"crypto/sha1"
-	"encoding/base64"
-	"fmt"
-	"log"
 	"net/http"
 	"time"
 )
 
-const (
-	WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-)
-
-type Server struct{}
+type Server struct {
+	BeforeHandshake func(*WebSocket) (error, int)
+	OnOpen          func(*WebSocket) error
+	OnClose         func(*WebSocket) error
+	OnMessage       func(*DataFrame, *WebSocket) error
+}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	log.Println("ws connecting...")
-	s.handshake(w, request)
-
-	hj := w.(http.Hijacker)
-	conn, bufrw, err := hj.Hijack()
+	ws, err := NewWebSocket(w, request)
 	if err != nil {
-		conn.Close()
-		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if s.BeforeHandshake != nil {
+		if err, code := s.BeforeHandshake(ws); err != nil {
+			http.Error(w, err.Error(), code)
+			return
+		}
+	}
+
+	if err := ws.Handshake(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if s.OnOpen != nil {
+		if err := s.OnOpen(ws); err != nil {
+			ws.Close()
+		}
 	}
 
 	go func() {
-		t := time.Tick(time.Second)
-		for range t {
-			df := DataFrame{}
-			df.Write([]byte("ni hao"))
-			bufrw.Write(df.Bytes())
-			bufrw.Flush()
+		for {
+			ws.Recv()
 		}
 	}()
 
 	for {
-		frame := new(DataFrame)
-		header, err := parseDataFrameHeader(bufrw)
-		if err != nil {
-			conn.Close()
-			log.Println(err)
+		select {
+		case df := <-ws.OutCH:
+			if err := ws.Handler.Send(df); err != nil {
+				ws.Close()
+			}
+		case df := <-ws.InCH:
+			switch df.Header.GetOpCode() {
+			case OpCodes_CONTINUATION:
+				// TODO
+			case OpCodes_BINARY:
+				// TODO
+			case OpCodes_TEXT:
+				if s.OnMessage != nil {
+					if err := s.OnMessage(df, ws); err != nil {
+						ws.Close()
+					}
+				}
+			case OpCodes_PING:
+				ws.Handler.Pong()
+			case OpCodes_CLOSE:
+				ws.Close()
+			}
+		case <-ws.Closed:
+			if s.OnClose != nil {
+				s.OnClose(ws)
+			}
+			ws.Handler.Close()
 		}
-		frame.Header = header
-		frame.Payload = make([]byte, frame.Header.Length())
-		bufrw.Read(frame.Payload)
-
-		fmt.Printf("Payload length: %d\n", frame.Header.Length())
-		fmt.Printf("Masked: %v\n", frame.Header.IsMasked())
-		fmt.Printf("%0b\n", frame.Header)
-		fmt.Printf("%s\n", frame.GetPayload())
 	}
-}
-
-func (s *Server) handshake(w http.ResponseWriter, request *http.Request) {
-	k := request.Header.Get("Sec-WebSocket-Key")
-	h := sha1.New()
-	h.Write([]byte(k))
-	h.Write([]byte(WS_GUID))
-	sec := base64.StdEncoding.EncodeToString(h.Sum(nil)[:])
-
-	w.Header().Set("Sec-WebSocket-Accept", sec)
-	w.Header().Set("Upgrade", "websocket")
-	w.Header().Set("Connection", "Upgrade")
-	w.WriteHeader(http.StatusSwitchingProtocols)
 }

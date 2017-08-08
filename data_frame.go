@@ -108,6 +108,11 @@ func (h DataFrameHeader) Length() uint64 {
 	}
 }
 
+func (h DataFrameHeader) GetOpCode() OpCode {
+	op := h[0] & DataFrame_BIT4
+	return OpCode(op)
+}
+
 func (h DataFrameHeader) IsMasked() bool {
 	return h[1]&DataFrame_BIT1 != 0
 }
