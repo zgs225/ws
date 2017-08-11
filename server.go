@@ -29,7 +29,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 
 	go func() {
 		for {
-			if socket.Closed {
+			if socket.Status == WebSocketStatus_CLOSING || socket.Status == WebSocketStatus_CLOSED {
 				return
 			}
 			socket.Recv()
@@ -39,7 +39,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	go func() {
 		ticker := time.Tick(time.Second)
 		for range ticker {
-			if socket.Closed {
+			if socket.Status == WebSocketStatus_CLOSING || socket.Status == WebSocketStatus_CLOSED {
 				return
 			}
 			if err := socket.Handler.Ping(); err != nil {
@@ -50,15 +50,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	}()
 
 	for {
-		if socket.Closed {
+		if socket.Status == WebSocketStatus_CLOSED {
 			return
 		}
 		select {
+		case <-socket.CloseCH:
+			s.close(socket)
+			return
 		case p := <-socket.OutCH:
+			if socket.Status == WebSocketStatus_CLOSING || socket.Status == WebSocketStatus_CLOSED {
+				continue
+			}
 			if err := socket.Handler.Send(p); err != nil {
 				socket.Close()
 			}
 		case df := <-socket.InCH:
+			if socket.Status == WebSocketStatus_CLOSING || socket.Status == WebSocketStatus_CLOSED {
+				continue
+			}
 			switch df.Header.GetOpCode() {
 			case OpCodes_CONTINUATION:
 				// TODO
@@ -73,15 +82,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 			case OpCodes_PING:
 				socket.Handler.Pong()
 			case OpCodes_CLOSE:
-				socket.Close()
+				s.close(socket)
 			}
-		case <-socket.CloseCH:
-			if s.OnClose != nil {
-				s.OnClose(socket)
-			}
-			socket.Handler.Close()
-			socket.Closed = true
-			return
 		}
 	}
+}
+
+func (s *Server) close(socket *WebSocket) {
+	socket.Status = WebSocketStatus_CLOSING
+	if s.OnClose != nil {
+		s.OnClose(socket)
+	}
+	socket.Handler.Close()
+	socket.Status = WebSocketStatus_CLOSED
 }

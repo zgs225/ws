@@ -19,6 +19,16 @@ var (
 	ErrSecWebSocketKeyHeader     = errors.New("Sec-WebSocket-Key header required or error")
 	ErrOriginHeader              = errors.New("Origin header required or error")
 	ErrSecWebSocketVersionHeader = errors.New("Sec-WebSocket-Version header must be 13")
+	ErrClosedConnection          = errors.New("Connection has connected")
+)
+
+type WebSocketStatus int8
+
+const (
+	WebSocketStatus_DISCONNECT WebSocketStatus = 0
+	WebSocketStatus_CONNECTED                  = 1
+	WebSocketStatus_CLOSING                    = 2
+	WebSocketStatus_CLOSED                     = 3
 )
 
 type WebSocket struct {
@@ -29,8 +39,8 @@ type WebSocket struct {
 	ID      uint
 	OutCH   chan []byte
 	InCH    chan *DataFrame
-	Closed  bool
 	CloseCH chan struct{}
+	Status  WebSocketStatus
 }
 
 func NewWebSocket(w http.ResponseWriter, request *http.Request, before func(*WebSocket) (error, int)) (ws *WebSocket, err error) {
@@ -40,7 +50,8 @@ func NewWebSocket(w http.ResponseWriter, request *http.Request, before func(*Web
 		ID:      NextGlobalID(),
 		OutCH:   make(chan []byte),
 		InCH:    make(chan *DataFrame),
-		CloseCH: make(chan struct{}),
+		CloseCH: make(chan struct{}, 1),
+		Status:  WebSocketStatus_DISCONNECT,
 	}
 
 	if before != nil {
@@ -60,23 +71,36 @@ func NewWebSocket(w http.ResponseWriter, request *http.Request, before func(*Web
 		return
 	}
 	ws.Handler = hdr
+	ws.Status = WebSocketStatus_CONNECTED
 
 	return
 }
 
-func (ws *WebSocket) Send(p []byte) {
+func (ws *WebSocket) Send(p []byte) error {
+	if ws.Status == WebSocketStatus_CLOSING || ws.Status == WebSocketStatus_CLOSED {
+		return ErrClosedConnection
+	}
 	ws.OutCH <- p
+	return nil
 }
 
-func (ws *WebSocket) Recv() {
+func (ws *WebSocket) Recv() error {
+	if ws.Status == WebSocketStatus_CLOSING || ws.Status == WebSocketStatus_CLOSED {
+		return ErrClosedConnection
+	}
 	df, err := ws.Handler.Recv()
 	if err != nil {
-		ws.Close()
+		return err
 	}
 	ws.InCH <- df
+	return nil
 }
 
 func (ws *WebSocket) Close() {
+	if ws.Status == WebSocketStatus_CLOSING || ws.Status == WebSocketStatus_CLOSED {
+		return
+	}
+	ws.Status = WebSocketStatus_CLOSING
 	ws.CloseCH <- struct{}{}
 }
 
