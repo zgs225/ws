@@ -62,7 +62,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 				continue
 			}
 			if err := socket.Handler.Send(p); err != nil {
-				socket.Close()
+				s.close(socket)
 			}
 		case df := <-socket.InCH:
 			if socket.Status == WebSocketStatus_CLOSING || socket.Status == WebSocketStatus_CLOSED {
